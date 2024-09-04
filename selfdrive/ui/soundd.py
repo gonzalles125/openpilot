@@ -3,7 +3,6 @@ import numpy as np
 import time
 import wave
 
-from typing import Dict, Optional, Tuple
 
 from cereal import car, messaging
 from openpilot.common.basedir import BASEDIR
@@ -27,7 +26,7 @@ DB_SCALE = 30 # AMBIENT_DB + DB_SCALE is where MAX_VOLUME is applied
 AudibleAlert = car.CarControl.HUDControl.AudibleAlert
 
 
-sound_list: Dict[int, Tuple[str, Optional[int], float]] = {
+sound_list: dict[int, tuple[str, int | None, float]] = {
   # AudibleAlert, file name, play count (none for infinite)
   AudibleAlert.engage: ("engage.wav", 1, MAX_VOLUME),
   AudibleAlert.disengage: ("disengage.wav", 1, MAX_VOLUME),
@@ -42,10 +41,10 @@ sound_list: Dict[int, Tuple[str, Optional[int], float]] = {
 }
 
 def check_controls_timeout_alert(sm):
-  controls_missing = time.monotonic() - sm.rcv_time['controlsState']
+  controls_missing = time.monotonic() - sm.recv_time['selfdriveState']
 
   if controls_missing > CONTROLS_TIMEOUT:
-    if sm['controlsState'].enabled and (controls_missing - CONTROLS_TIMEOUT) < 10:
+    if sm['selfdriveState'].enabled and (controls_missing - CONTROLS_TIMEOUT) < 10:
       return True
 
   return False
@@ -64,7 +63,7 @@ class Soundd:
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
 
   def load_sounds(self):
-    self.loaded_sounds: Dict[int, np.ndarray] = {}
+    self.loaded_sounds: dict[int, np.ndarray] = {}
 
     # Load all sounds
     for sound in sound_list:
@@ -112,8 +111,8 @@ class Soundd:
       self.current_sound_frame = 0
 
   def get_audible_alert(self, sm):
-    if sm.updated['controlsState']:
-      new_alert = sm['controlsState'].alertSound.raw
+    if sm.updated['selfdriveState']:
+      new_alert = sm['selfdriveState'].alertSound.raw
       self.update_alert(new_alert)
     elif check_controls_timeout_alert(sm):
       self.update_alert(AudibleAlert.warningImmediate)
@@ -137,7 +136,7 @@ class Soundd:
     # sounddevice must be imported after forking processes
     import sounddevice as sd
 
-    sm = messaging.SubMaster(['controlsState', 'microphone'])
+    sm = messaging.SubMaster(['selfdriveState', 'microphone'])
 
     with self.get_stream(sd) as stream:
       rk = Ratekeeper(20)

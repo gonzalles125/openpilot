@@ -25,10 +25,8 @@ def generate_translations_include():
 
 
 def update_translations(vanish: bool = False, translation_files: None | list[str] = None, translations_dir: str = TRANSLATIONS_DIR):
-  generate_translations_include()
-
   if translation_files is None:
-    with open(LANGUAGES_FILE, "r") as f:
+    with open(LANGUAGES_FILE) as f:
       translation_files = json.load(f).values()
 
   for file in translation_files:
@@ -48,4 +46,5 @@ if __name__ == "__main__":
   parser.add_argument("--vanish", action="store_true", help="Remove translations with source text no longer found")
   args = parser.parse_args()
 
+  generate_translations_include()
   update_translations(args.vanish)

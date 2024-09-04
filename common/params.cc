@@ -24,8 +24,8 @@ int fsync_dir(const std::string &path) {
   int result = -1;
   int fd = HANDLE_EINTR(open(path.c_str(), O_RDONLY, 0755));
   if (fd >= 0) {
-    result = fsync(fd);
-    close(fd);
+    result = HANDLE_EINTR(fsync(fd));
+    HANDLE_EINTR(close(fd));
   }
   return result;
 }
@@ -89,12 +89,13 @@ private:
 
 std::unordered_map<std::string, uint32_t> keys = {
     {"AccessToken", CLEAR_ON_MANAGER_START | DONT_LOG},
+    {"AlwaysOnDM", PERSISTENT},
     {"ApiCache_Device", PERSISTENT},
-    {"ApiCache_NavDestinations", PERSISTENT},
     {"AssistNowToken", PERSISTENT},
     {"AthenadPid", PERSISTENT},
     {"AthenadUploadQueue", PERSISTENT},
     {"AthenadRecentlyViewedRoutes", PERSISTENT},
+    {"BootCount", PERSISTENT},
     {"CalibrationParams", PERSISTENT},
     {"CameraDebugExpGain", CLEAR_ON_MANAGER_START},
     {"CameraDebugExpTime", CLEAR_ON_MANAGER_START},
@@ -103,7 +104,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"CarParamsCache", CLEAR_ON_MANAGER_START},
     {"CarParamsPersistent", PERSISTENT},
     {"CarParamsPrevRoute", PERSISTENT},
-    {"CarVin", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"CompletedTrainingVersion", PERSISTENT},
     {"ControlsReady", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"CurrentBootlog", PERSISTENT},
@@ -124,6 +124,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"ForcePowerDown", PERSISTENT},
     {"GitBranch", PERSISTENT},
     {"GitCommit", PERSISTENT},
+    {"GitCommitDate", PERSISTENT},
     {"GitDiff", PERSISTENT},
     {"GithubSshKeys", PERSISTENT},
     {"GithubUsername", PERSISTENT},
@@ -157,11 +158,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"LiveParameters", PERSISTENT},
     {"LiveTorqueParameters", PERSISTENT | DONT_LOG},
     {"LongitudinalPersonality", PERSISTENT},
-    {"NavDestination", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
-    {"NavDestinationWaypoints", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
-    {"NavPastDestinations", PERSISTENT},
-    {"NavSettingLeftSide", PERSISTENT},
-    {"NavSettingTime24h", PERSISTENT},
     {"NetworkMetered", PERSISTENT},
     {"ObdMultiplexingChanged", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"ObdMultiplexingEnabled", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
@@ -169,7 +165,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"Offroad_CarUnrecognized", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
     {"Offroad_ConnectivityNeeded", CLEAR_ON_MANAGER_START},
     {"Offroad_ConnectivityNeededPrompt", CLEAR_ON_MANAGER_START},
-    {"Offroad_InvalidTime", CLEAR_ON_MANAGER_START},
     {"Offroad_IsTakingSnapshot", CLEAR_ON_MANAGER_START},
     {"Offroad_NeosUpdate", CLEAR_ON_MANAGER_START},
     {"Offroad_NoFirmware", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
@@ -182,15 +177,13 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"PandaHeartbeatLost", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"PandaSomResetTriggered", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"PandaSignatures", CLEAR_ON_MANAGER_START},
-    {"Passive", PERSISTENT},
     {"PrimeType", PERSISTENT},
     {"RecordFront", PERSISTENT},
     {"RecordFrontLock", PERSISTENT},  // for the internal fleet
-    {"ReplayControlsState", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
+    {"RouteCount", PERSISTENT},
     {"SnoozeUpdate", CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION},
     {"SshEnabled", PERSISTENT},
     {"TermsVersion", PERSISTENT},
-    {"Timezone", PERSISTENT},
     {"TrainingVersion", PERSISTENT},
     {"UbloxAvailable", PERSISTENT},
     {"UpdateAvailable", CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION},
@@ -205,8 +198,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"UpdaterTargetBranch", CLEAR_ON_MANAGER_START},
     {"UpdaterLastFetchTime", PERSISTENT},
     {"Version", PERSISTENT},
-    {"VisionRadarToggle", PERSISTENT},
-    {"WheeledBody", PERSISTENT},
 };
 
 } // namespace
@@ -273,7 +264,9 @@ int Params::put(const char* key, const char* value, size_t value_size) {
   } while (false);
 
   close(tmp_fd);
-  ::unlink(tmp_path.c_str());
+  if (result != 0) {
+    ::unlink(tmp_path.c_str());
+  }
   return result;
 }
 

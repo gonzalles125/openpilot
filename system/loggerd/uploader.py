@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import bz2
 import io
 import json
 import os
@@ -9,7 +8,8 @@ import threading
 import time
 import traceback
 import datetime
-from typing import BinaryIO, Iterator, List, Optional, Tuple
+import zstandard as zstd
+from collections.abc import Iterator
 
 from cereal import log
 import cereal.messaging as messaging
@@ -25,6 +25,7 @@ UPLOAD_ATTR_NAME = 'user.upload'
 UPLOAD_ATTR_VALUE = b'1'
 
 UPLOAD_QLOG_QCAM_MAX_SIZE = 5 * 1e6  # MB
+LOG_COMPRESSION_LEVEL = 10  # little benefit up to level 15. level ~17 is a small step change
 
 allow_sleep = bool(os.getenv("UPLOADER_SLEEP", "1"))
 force_wifi = os.getenv("FORCEWIFI") is not None
@@ -42,10 +43,12 @@ class FakeResponse:
     self.request = FakeRequest()
 
 
-def get_directory_sort(d: str) -> List[str]:
-  return [s.rjust(10, '0') for s in d.rsplit('--', 1)]
+def get_directory_sort(d: str) -> list[str]:
+  # ensure old format is sorted sooner
+  o = ["0", ] if d.startswith("2024-") else ["1", ]
+  return o + [s.rjust(10, '0') for s in d.rsplit('--', 1)]
 
-def listdir_by_creation(d: str) -> List[str]:
+def listdir_by_creation(d: str) -> list[str]:
   if not os.path.isdir(d):
     return []
 
@@ -80,9 +83,9 @@ class Uploader:
     self.last_filename = ""
 
     self.immediate_folders = ["crash/", "boot/"]
-    self.immediate_priority = {"qlog": 0, "qlog.bz2": 0, "qcamera.ts": 1}
+    self.immediate_priority = {"qlog": 0, "qlog.zst": 0, "qcamera.ts": 1}
 
-  def list_upload_files(self, metered: bool) -> Iterator[Tuple[str, str, str]]:
+  def list_upload_files(self, metered: bool) -> Iterator[tuple[str, str, str]]:
     r = self.params.get("AthenadRecentlyViewedRoutes", encoding="utf8")
     requested_routes = [] if r is None else r.split(",")
 
@@ -121,7 +124,7 @@ class Uploader:
 
         yield name, key, fn
 
-  def next_file_to_upload(self, metered: bool) -> Optional[Tuple[str, str, str]]:
+  def next_file_to_upload(self, metered: bool) -> tuple[str, str, str] | None:
     upload_files = list(self.list_upload_files(metered))
 
     for name, key, fn in upload_files:
@@ -148,14 +151,12 @@ class Uploader:
       return FakeResponse()
 
     with open(fn, "rb") as f:
-      data: BinaryIO
-      if key.endswith('.bz2') and not fn.endswith('.bz2'):
-        compressed = bz2.compress(f.read())
-        data = io.BytesIO(compressed)
-      else:
-        data = f
+      content = f.read()
+      if key.endswith('.zst') and not fn.endswith('.zst'):
+        content = zstd.compress(content, LOG_COMPRESSION_LEVEL)
 
-      return requests.put(url, data=data, headers=headers, timeout=10)
+      with io.BytesIO(content) as data:
+        return requests.put(url, data=data, headers=headers, timeout=10)
 
   def upload(self, name: str, key: str, fn: str, network_type: int, metered: bool) -> bool:
     try:
@@ -207,21 +208,21 @@ class Uploader:
     return success
 
 
-  def step(self, network_type: int, metered: bool) -> bool:
+  def step(self, network_type: int, metered: bool) -> bool | None:
     d = self.next_file_to_upload(metered)
     if d is None:
-      return True
+      return None
 
     name, key, fn = d
 
     # qlogs and bootlogs need to be compressed before uploading
-    if key.endswith(('qlog', 'rlog')) or (key.startswith('boot/') and not key.endswith('.bz2')):
-      key += ".bz2"
+    if key.endswith(('qlog', 'rlog')) or (key.startswith('boot/') and not key.endswith('.zst')):
+      key += ".zst"
 
     return self.upload(name, key, fn, network_type, metered)
 
 
-def main(exit_event: Optional[threading.Event] = None) -> None:
+def main(exit_event: threading.Event = None) -> None:
   if exit_event is None:
     exit_event = threading.Event()
 
@@ -253,12 +254,15 @@ def main(exit_event: Optional[threading.Event] = None) -> None:
       continue
 
     success = uploader.step(sm['deviceState'].networkType.raw, sm['deviceState'].networkMetered)
-    if success:
+    if success is None:
+      backoff = 60 if offroad else 5
+    elif success:
       backoff = 0.1
-    elif allow_sleep:
+    else:
       cloudlog.info("upload backoff %r", backoff)
       backoff = min(backoff*2, 120)
-    time.sleep(backoff + random.uniform(0, backoff))
+    if allow_sleep:
+      time.sleep(backoff + random.uniform(0, backoff))
 
 
 if __name__ == "__main__":

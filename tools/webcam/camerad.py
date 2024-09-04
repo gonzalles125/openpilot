@@ -3,7 +3,7 @@ import threading
 import os
 from collections import namedtuple
 
-from cereal.visionipc import VisionIpcServer, VisionStreamType
+from msgq.visionipc import VisionIpcServer, VisionStreamType
 from cereal import messaging
 
 from openpilot.tools.webcam.camera import Camera
@@ -25,8 +25,7 @@ class Camerad:
 
     self.cameras = []
     for c in CAMERAS:
-      cam = Camera(c.msg_name, c.stream_type, int(c.cam_id))
-      assert cam.cap.isOpened(), f"Can't find camera {c}"
+      cam = Camera(c.msg_name, c.stream_type, c.cam_id)
       self.cameras.append(cam)
       self.vipc_server.create_buffers(c.stream_type, 20, False, cam.W, cam.H)
 
@@ -47,11 +46,10 @@ class Camerad:
 
   def camera_runner(self, cam):
     rk = Ratekeeper(20, None)
-    while cam.cap.isOpened():
-      for yuv in cam.read_frames():
-        self._send_yuv(yuv, cam.cur_frame_id, cam.cam_type_state, cam.stream_type)
-        cam.cur_frame_id += 1
-        rk.keep_time()
+    for yuv in cam.read_frames():
+      self._send_yuv(yuv, cam.cur_frame_id, cam.cam_type_state, cam.stream_type)
+      cam.cur_frame_id += 1
+      rk.keep_time()
 
   def run(self):
     threads = []
@@ -63,6 +61,11 @@ class Camerad:
     for t in threads:
       t.join()
 
-if __name__ == "__main__":
+
+def main():
   camerad = Camerad()
   camerad.run()
+
+
+if __name__ == "__main__":
+  main()
